@@ -1,0 +1,16 @@
+{
+	"FileVersion": 3,
+	"EngineAssociation": "5.4",
+	"Category": "Game",
+	"Description": "EchoLine - offline LAN/hotspot multiplayer arena shooter (realistic sci-fi). Prototype.",
+	"Modules": [
+		{
+			"Name": "EchoLine",
+			"Type": "Runtime",
+			"LoadingPhase": "Default",
+			"AdditionalDependencies": [
+				"Engine"
+			]
+		}
+	]
+}

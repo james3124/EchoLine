@@ -1,0 +1,84 @@
+# Builds the EchoLine Android APK with Unreal's automation tool.
+#
+# IMPORTANT: this does NOT run on GitHub's free cloud runners.
+# Unreal Engine 5 cannot fit or run there (~14 GB guaranteed free disk; the engine plus the
+# Android SDK/NDK need far more, and Epic's licence restricts downloading the engine on CI).
+#
+# This workflow is for a SELF-HOSTED runner (your own PC registered with GitHub) or a paid
+# "larger runner" with 150 GB+ of disk. See Docs/BUILDING.md for the full explanation.
+#
+# Required on the runner machine:
+#   - Unreal Engine 5.4 installed, with Android platform support
+#   - Android Studio / SDK with the NDK versions UE asks for
+#   - Environment variable UE_ROOT pointing at the engine, e.g. C:\Program Files\Epic Games\UE_5.4
+#   - A PLAYER_START_MAP-able project level saved as Content/Maps/RelayYard (create once in the editor)
+#
+# Optional signing (for a release APK), store as repository secrets:
+#   KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD
+
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      configuration:
+        description: "Development or Shipping"
+        required: true
+        default: "Development"
+
+jobs:
+  android:
+    # Change this to your runner's labels. On a paid larger runner use e.g. ubuntu-latest-large.
+    runs-on: [self-hosted, windows, ue5]
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show engine root
+        shell: powershell
+        run: |
+          Write-Output "UE_ROOT = $env:UE_ROOT"
+          if (-not (Test-Path "$env:UE_ROOT\Engine\Build\BatchFiles\RunUAT.bat")) {
+            throw "UE_ROOT is not set correctly. Set it to your Unreal Engine install folder."
+          }
+
+      - name: Restore signing keystore (optional)
+        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
+        shell: powershell
+        run: |
+          $bytes = [System.Convert]::FromBase64String("${{ secrets.KEYSTORE_BASE64 }}")
+          New-Item -ItemType Directory -Force -Path "Build\Android" | Out-Null
+          [System.IO.File]::WriteAllBytes("Build\Android\echoline.keystore", $bytes)
+          Write-Output "Keystore restored."
+
+      - name: Build, cook, stage and package
+        shell: powershell
+        run: |
+          & "$env:UE_ROOT\Engine\Build\BatchFiles\RunUAT.bat" BuildCookRun `
+            -project="${{ github.workspace }}\EchoLine.uproject" `
+            -noP4 `
+            -platform=Android `
+            -cook `
+            -build `
+            -stage `
+            -package `
+            -archive `
+            -archivedirectory="${{ github.workspace }}\Build" `
+            -clientconfig=${{ github.event.inputs.configuration }} `
+            -serverconfig=${{ github.event.inputs.configuration }} `
+            -nocompileeditor `
+            -utf8output `
+            -unattended `
+            -noclean
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: EchoLine-Android-APK
+          path: |
+            Build/Android_ASTC/*.apk
+            Build/Android_ETC2/*.apk
+          if-no-files-found: error
+          retention-days: 30

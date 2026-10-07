@@ -1,0 +1,89 @@
+# EXPERIMENTAL: attempt an Unreal Android build on GitHub CLOUD runners.
+#
+# READ THIS FIRST
+# ---------------
+# Free GitHub-hosted runners are documented with ~14 GB guaranteed free disk (2-core, private
+# repos). Unreal Engine 5 plus the Android SDK/NDK needs far more, so this workflow has a real
+# chance of failing with "No space left on device" or a timeout.
+#
+# TWO reasons this often fails, not one:
+#   1. Disk/time. Free runners are small.
+#   2. The official Unreal Linux dev containers target LINUX and WINDOWS builds. They do NOT
+#      include the Android SDK/NDK. Packaging an Android APK from the container requires
+#      installing the whole Android toolchain first, which this workflow does not do.
+#
+# To give it the best odds:
+#   * Make the repository PUBLIC. Public repos get a 4-core runner with ~150 GB disk.
+#   * Link your GitHub account to an Epic Games account so you can pull Epic's Unreal container
+#     images (ghcr.io/epicgames/unreal-engine). This is Epic's licence gate.
+#   * Add a repository secret GHCR_TOKEN = a GitHub PAT with `read:packages` scope.
+#
+# If it fails, that is expected on free runners. See Docs/BUILDING.md for the paths that work:
+# a one-time PC build, or porting to Godot / a web build so you can build on the phone itself.
+#
+# This is not a supported build path. It is a long shot that sometimes works.
+
+name: Build Android APK (cloud attempt)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ue_image:
+        description: "Unreal container image tag (must match your project's engine version)"
+        required: true
+        default: "ghcr.io/epicgames/unreal-engine:dev-5.4.4"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Free disk space on the runner
+        run: |
+          echo "Before:"; df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          sudo apt-get clean || true
+          docker system prune -af || true
+          echo "After:"; df -h /
+
+      - name: Log in to GitHub Container Registry
+        run: echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Pull the Unreal container
+        run: |
+          docker pull "${{ github.event.inputs.ue_image }}"
+
+      - name: Build the APK inside the container
+        run: |
+          # The container ships the engine under /home/ue4/UnrealEngine.
+          # Android support may need installing; adjust the path if your image differs.
+          docker run --rm --ipc=host \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace \
+            "${{ github.event.inputs.ue_image }}" \
+            bash -lc '
+              set -e
+              UAT=/home/ue4/UnrealEngine/Engine/Build/BatchFiles/RunUAT.sh
+              if [ ! -f "$UAT" ]; then echo "RunUAT.sh not found in image; adjust the path."; exit 1; fi
+              "$UAT" BuildCookRun \
+                -project=/workspace/EchoLine.uproject \
+                -noP4 -platform=Android -cook -build -stage -package \
+                -archive -archivedirectory=/workspace/Build \
+                -clientconfig=Development -nocompileeditor -utf8output -unattended
+            '
+
+      - name: Upload APK
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: EchoLine-Android-APK-cloud-attempt
+          path: |
+            Build/Android_ASTC/*.apk
+            Build/Android_ETC2/*.apk
+          if-no-files-found: warn
+          retention-days: 14
