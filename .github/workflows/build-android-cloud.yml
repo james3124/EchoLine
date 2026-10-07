@@ -51,8 +51,14 @@ jobs:
           docker system prune -af || true
           echo "After:"; df -h /
 
-      - name: Log in to GitHub Container Registry
-        run: echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+      - name: Log in to GitHub Container Registry (optional)
+        run: |
+          if [ -z "${{ secrets.GHCR_TOKEN }}" ]; then
+            echo "::warning::GHCR_TOKEN is not set. Pulling Epic's Unreal image will fail without it."
+            echo "Link your Epic account to GitHub and add a PAT with read:packages as GHCR_TOKEN."
+            exit 0
+          fi
+          echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
       - name: Pull the Unreal container
         run: |

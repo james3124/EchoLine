@@ -32,6 +32,11 @@ jobs:
     runs-on: [self-hosted, windows, ue5]
     timeout-minutes: 180
 
+    # The `secrets` context is not allowed inside `if:` expressions, so expose the optional
+    # keystore through a job-level env var and test that instead.
+    env:
+      KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -45,10 +50,15 @@ jobs:
           }
 
       - name: Restore signing keystore (optional)
-        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
         shell: powershell
         run: |
-          $bytes = [System.Convert]::FromBase64String("${{ secrets.KEYSTORE_BASE64 }}")
+          # The keystore is optional. Handle its absence in the script rather than in an
+          # `if:` expression, because expression contexts are restricted and version-dependent.
+          if ([string]::IsNullOrEmpty($env:KEYSTORE_BASE64)) {
+            Write-Output "No KEYSTORE_BASE64 secret set; packaging with an unsigned/debug key."
+            exit 0
+          }
+          $bytes = [System.Convert]::FromBase64String($env:KEYSTORE_BASE64)
           New-Item -ItemType Directory -Force -Path "Build\Android" | Out-Null
           [System.IO.File]::WriteAllBytes("Build\Android\echoline.keystore", $bytes)
           Write-Output "Keystore restored."
